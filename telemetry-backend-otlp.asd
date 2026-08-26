@@ -4,9 +4,6 @@
   :author "egao1980"
   :license "MIT"
   :depends-on ("telemetry-protocol" "http-protocol" "json-protocol" "json-backend-jzon" "babel")
-  :properties
-  (:cl-repo
-   (:ci (:sources (("rove" :ql)))))
   :serial t
   :pathname "src"
   :components ((:file "package")
