@@ -7,6 +7,7 @@
    #:use-otlp-telemetry
    #:otlp-endpoint
    #:otlp-service-name
+   #:encode-otlp-metrics
    #:+default-otlp-endpoint+))
 
 (in-package #:telemetry-backend-otlp)

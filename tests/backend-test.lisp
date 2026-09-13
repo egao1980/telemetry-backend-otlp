@@ -105,3 +105,59 @@
       (stack-telemetry:with-span ("h") nil))
     (ok (equal "Bearer z"
                (cdr (assoc "authorization" (third (car box)) :test #'equal))))))
+
+(deftest otlp-metrics-payload-shape
+  (let* ((b (telemetry-backend-otlp:make-otlp-telemetry-backend
+             :service-name "unit-test"))
+         (counter (stack-telemetry:make-telemetry-metric
+                   :name "hits" :value 3 :unit "1" :kind :counter
+                   :attributes (list "route" "/")))
+         (hist (stack-telemetry:make-telemetry-metric
+                :name "latency" :value 0.7 :unit "s" :kind :histogram
+                :boundaries '(0.5 1.0 5.0)))
+         (payload (telemetry-backend-otlp:encode-otlp-metrics
+                   b (list counter hist)))
+         (rm (elt (%ht-get payload "resourceMetrics") 0))
+         (sm (elt (%ht-get rm "scopeMetrics") 0))
+         (metrics (%ht-get sm "metrics"))
+         (hits (find "hits" metrics :key (lambda (m) (gethash "name" m))
+                     :test #'equal))
+         (lat (find "latency" metrics :key (lambda (m) (gethash "name" m))
+                    :test #'equal)))
+    (ok (hash-table-p payload))
+    (ok rm)
+    (ok sm)
+    (ok hits)
+    (ok lat)
+    (ok (equal "1" (gethash "unit" hits)))
+    (ok (gethash "sum" hits))
+    (ok (eq t (%ht-get hits "sum" "isMonotonic")))
+    (ok (equal "3" (%ht-get (elt (%ht-get hits "sum" "dataPoints") 0)
+                            "asInt")))
+    (ok (gethash "histogram" lat))
+    (ok (equalp #(0.5 1.0 5.0)
+                (%ht-get (elt (%ht-get lat "histogram" "dataPoints") 0)
+                         "explicitBounds")))))
+
+(deftest otlp-metrics-flush-posts-resource-metrics
+  (let* ((box (list nil))
+         (b (telemetry-backend-otlp:make-otlp-telemetry-backend
+             :endpoint "http://collector.invalid"
+             :service-name "unit-test"
+             :request-fn (%capture-fn box))))
+    (stack-telemetry:record-metric b "hits" 3 :unit "1")
+    (ok (null (car box)))
+    (stack-telemetry:flush-telemetry b)
+    (destructuring-bind (method url headers body) (car box)
+      (ok (eq :post method))
+      (ok (equal "http://collector.invalid/v1/metrics" url))
+      (ok (equal "application/json" (cdr (assoc "content-type" headers :test #'equal))))
+      (let* ((rm (elt (%ht-get body "resourceMetrics") 0))
+             (metrics (%ht-get (elt (%ht-get rm "scopeMetrics") 0) "metrics"))
+             (hits (find "hits" metrics :key (lambda (m) (gethash "name" m))
+                         :test #'equal)))
+        (ok (equal "unit-test"
+                   (%ht-get (elt (%ht-get rm "resource" "attributes") 0)
+                            "value" "stringValue")))
+        (ok hits)
+        (ok (gethash "sum" hits))))))
